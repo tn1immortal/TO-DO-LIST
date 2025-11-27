@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quản Lý Công Việc (Offline)</title>
+    <title>Quản Lý Công Việc (Hybrid)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -15,19 +15,31 @@
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .task-enter { animation: slideIn 0.3s ease-out forwards; }
         @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .loader { border-top-color: #4f46e5; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
+        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen py-4 px-3 sm:px-6 lg:px-8">
 
     <div class="max-w-3xl mx-auto">
+        
+        <!-- Status Banner -->
+        <div id="status-banner" class="hidden mb-4 p-3 rounded-lg flex items-center justify-between text-sm shadow-sm transition-all">
+            <span id="status-text" class="font-medium flex items-center"></span>
+            <button onclick="retryConnection()" id="retry-btn" class="hidden underline ml-2 text-xs">Thử kết nối lại</button>
+        </div>
+
         <!-- Header -->
         <div class="bg-white rounded-xl shadow-lg p-5 mb-5 relative overflow-hidden">
-            <div class="absolute top-0 left-0 w-1 h-full bg-indigo-600"></div>
+            <div id="header-bar" class="absolute top-0 left-0 w-1 h-full bg-gray-300 transition-colors duration-500"></div>
             <div class="flex justify-between items-start mb-4">
                 <div>
-                    <h1 class="text-2xl font-bold text-gray-800"><i class="fas fa-laptop-house text-indigo-500 mr-2"></i>Todo Local</h1>
-                    <p class="text-xs text-gray-500 mt-1" id="current-date">...</p>
-                    <p class="text-[10px] text-gray-400 mt-0.5"><i class="fas fa-database mr-1"></i>Dữ liệu lưu trên máy này</p>
+                    <h1 class="text-2xl font-bold text-gray-800 flex items-center">
+                        <i id="header-icon" class="fas fa-circle-notch fa-spin text-gray-400 mr-2 transition-colors"></i>
+                        Todo <span id="mode-label" class="ml-1">App</span>
+                    </h1>
+                    <p class="text-xs text-gray-500 mt-1" id="current-date">Đang khởi động...</p>
+                    <p class="text-[10px] text-gray-400 mt-0.5">ID: <span id="user-id-display">...</span></p>
                 </div>
                 <button onclick="requestNotificationPermission()" id="btn-notify" class="text-xs bg-gray-100 text-gray-600 px-3 py-2 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition">
                     <i class="fas fa-bell"></i>
@@ -62,10 +74,15 @@
                     </div>
                 </div>
 
-                <button type="submit" id="btn-add" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md transition duration-200 flex justify-center items-center">
+                <button type="submit" id="btn-add" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md transition duration-200 flex justify-center items-center disabled:opacity-50">
                     <i class="fas fa-plus mr-2"></i> Thêm Công Việc
                 </button>
             </form>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading-indicator" class="flex justify-center py-4">
+            <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-8 w-8"></div>
         </div>
 
         <!-- SECTION: Đang thực hiện -->
@@ -99,7 +116,32 @@
     <!-- Toast Notification -->
     <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
 
-    <script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+        // --- Config Của Bạn ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyApbQ_ZEH-Is0rpr1gektLBNtuX2-2dtmc",
+            authDomain: "dong-bo-data.firebaseapp.com",
+            databaseURL: "https://dong-bo-data-default-rtdb.firebaseio.com",
+            projectId: "dong-bo-data",
+            storageBucket: "dong-bo-data.firebasestorage.app",
+            messagingSenderId: "435238492536",
+            appId: "1:435238492536:web:b44b601b8e2595c57e108d",
+            measurementId: "G-YFN6XNFJ5G"
+        };
+
+        // --- Global State ---
+        let app, auth, db;
+        let isOfflineMode = false;
+        let currentUser = null;
+        let allTodos = []; 
+        let availableTags = new Set();
+        const appId = 'my-todo-app'; 
+
         // --- DOM Elements ---
         const todoForm = document.getElementById('todo-form');
         const taskInput = document.getElementById('task-input');
@@ -110,39 +152,150 @@
         const todoListEl = document.getElementById('todo-list');
         const completedListEl = document.getElementById('completed-list');
         const quickTagsEl = document.getElementById('quick-tags');
+        const loadingIndicator = document.getElementById('loading-indicator');
         const btnAdd = document.getElementById('btn-add');
-        
-        // --- State Management (LocalStorage) ---
-        let allTodos = JSON.parse(localStorage.getItem('todos')) || [];
-        let availableTags = new Set(); 
+        const userIdDisplay = document.getElementById('user-id-display');
+        const statusBanner = document.getElementById('status-banner');
+        const statusText = document.getElementById('status-text');
+        const retryBtn = document.getElementById('retry-btn');
+        const headerIcon = document.getElementById('header-icon');
+        const headerBar = document.getElementById('header-bar');
+        const modeLabel = document.getElementById('mode-label');
 
-        // --- Init ---
-        updateDateTime();
-        refreshUI();
-
-        // --- Functions ---
-
-        function saveTodos() {
-            localStorage.setItem('todos', JSON.stringify(allTodos));
-            refreshUI();
+        // --- Helper: Format Date ---
+        function formatDate(isoString) {
+            if (!isoString) return '';
+            const date = new Date(isoString);
+            return date.toLocaleString('vi-VN', { 
+                hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' 
+            });
         }
 
-        function refreshUI() {
-            // Reset Tags Set
+        // --- INITIALIZATION FLOW ---
+        function initApp() {
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                
+                // Thử đăng nhập - Xử lý lỗi Silent (không log đỏ console nếu là lỗi config)
+                signInAnonymously(auth).catch((error) => {
+                    // Kiểm tra mã lỗi để xử lý mượt mà
+                    if (error.code === 'auth/configuration-not-found' || error.code === 'auth/operation-not-allowed') {
+                        console.warn("Firebase Auth chưa được bật. Chuyển sang chế độ Offline."); // Dùng warn thay vì error
+                        switchToOfflineMode("Chế độ Offline (Cloud chưa cấu hình)");
+                    } else if (error.code === 'auth/network-request-failed') {
+                        console.warn("Lỗi mạng. Chuyển sang chế độ Offline.");
+                        switchToOfflineMode("Chế độ Offline (Không có mạng)");
+                    } else {
+                         console.error("Lỗi xác thực khác:", error);
+                         switchToOfflineMode("Chế độ Offline (Lỗi xác thực)");
+                    }
+                });
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        console.log("Đã đăng nhập:", user.uid);
+                        currentUser = user;
+                        switchToOnlineMode();
+                    }
+                });
+
+            } catch (e) {
+                console.error("Lỗi khởi tạo:", e);
+                switchToOfflineMode("Chế độ Offline (Lỗi khởi tạo)");
+            }
+        }
+
+        // --- MODE SWITCHING ---
+
+        function switchToOnlineMode() {
+            if (!isOfflineMode && currentUser) {
+                 // Đã online, chỉ update UI nếu cần
+            }
+            isOfflineMode = false;
+            loadingIndicator.classList.add('hidden');
+            
+            // UI Updates
+            headerBar.className = "absolute top-0 left-0 w-1 h-full bg-green-500 transition-colors duration-500";
+            headerIcon.className = "fas fa-cloud text-green-500 mr-2";
+            headerIcon.classList.remove('fa-spin');
+            modeLabel.textContent = "Cloud";
+            userIdDisplay.textContent = currentUser.uid.substring(0, 8) + "...";
+            userIdDisplay.classList.remove("text-orange-500");
+            
+            // Status Banner
+            statusBanner.classList.add('hidden');
+
+            setupRealtimeListener(currentUser.uid);
+            showToast("Đã kết nối Cloud!", "success");
+        }
+
+        function switchToOfflineMode(reason) {
+            if (isOfflineMode) return; // Prevent double init
+            isOfflineMode = true;
+            loadingIndicator.classList.add('hidden');
+
+            // UI Updates
+            headerBar.className = "absolute top-0 left-0 w-1 h-full bg-orange-500 transition-colors duration-500";
+            headerIcon.className = "fas fa-database text-orange-500 mr-2";
+            headerIcon.classList.remove('fa-spin');
+            modeLabel.textContent = "Offline";
+            userIdDisplay.textContent = "Lưu trên máy này";
+            userIdDisplay.classList.add("text-orange-500");
+
+            // Status Banner
+            statusBanner.classList.remove('hidden');
+            statusBanner.className = "mb-4 p-3 rounded-lg flex items-center justify-between text-sm shadow-sm transition-all bg-orange-50 border border-orange-200 text-orange-700";
+            statusText.innerHTML = `<i class="fas fa-exclamation-circle mr-2"></i> ${reason}`;
+            retryBtn.classList.remove('hidden');
+
+            loadOfflineData();
+        }
+
+        window.retryConnection = function() {
+            location.reload();
+        }
+
+        // --- DATA LOGIC (HYBRID) ---
+
+        // 1. Load Data
+        function setupRealtimeListener(userId) {
+            // Nếu đang offline thì không gọi Firestore để tránh lỗi thừa
+            if (isOfflineMode) return;
+
+            const q = query(
+                collection(db, 'artifacts', appId, 'users', userId, 'todos'),
+                orderBy('createdAt', 'desc')
+            );
+
+            onSnapshot(q, (snapshot) => {
+                processSnapshotData(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            }, (error) => {
+                console.warn("Firestore Warning:", error.message);
+                // Fallback nếu mất kết nối giữa chừng
+                if(!isOfflineMode) switchToOfflineMode("Mất kết nối dữ liệu. Đã chuyển sang Offline.");
+            });
+        }
+
+        function loadOfflineData() {
+            const localData = JSON.parse(localStorage.getItem('todos_offline')) || [];
+            // Sort by createdAt desc
+            localData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            processSnapshotData(localData);
+        }
+
+        function processSnapshotData(dataArray) {
+            allTodos = dataArray;
             availableTags.clear();
             
-            // Clear lists
             todoListEl.innerHTML = '';
             completedListEl.innerHTML = '';
             
             let todoCount = 0;
             let doneCount = 0;
 
-            // Sort todos: Mới nhất lên đầu
-            allTodos.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
             allTodos.forEach((todo) => {
-                // Collect Tags
                 if (todo.tags && Array.isArray(todo.tags)) {
                     todo.tags.forEach(tag => availableTags.add(tag));
                 }
@@ -158,20 +311,137 @@
 
             document.getElementById('count-todo').textContent = todoCount;
             document.getElementById('count-done').textContent = doneCount;
-
-            // Cập nhật gợi ý tags và danh sách chọn
             updateTagSelectors();
         }
 
-        function formatDate(isoString) {
-            if (!isoString) return '';
-            const date = new Date(isoString);
-            return date.toLocaleString('vi-VN', { 
-                hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' 
-            });
+        // 2. Add Data
+        async function addTodo(e) {
+            e.preventDefault();
+            const text = taskInput.value.trim();
+            if (!text) return;
+
+            btnAdd.disabled = true;
+            btnAdd.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            const tagsText = tagsInput.value.trim();
+            const tags = tagsText ? tagsText.split(',').map(tag => tag.trim()).filter(tag => tag !== "") : [];
+
+            const newTodoData = {
+                text: text,
+                completed: false,
+                createdAt: new Date().toISOString(),
+                alertTime: alertTimeInput.value || null,
+                tags: tags
+            };
+
+            try {
+                if (isOfflineMode) {
+                    // Offline Logic
+                    const newTodo = { id: Date.now().toString(), ...newTodoData };
+                    allTodos.unshift(newTodo);
+                    saveToLocalStorage();
+                    processSnapshotData(allTodos); // Re-render
+                    showToast("Đã lưu (Offline)!", "success");
+                } else {
+                    // Online Logic
+                    await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'todos'), newTodoData);
+                    showToast("Đã lưu lên Cloud!", "success");
+                }
+                
+                // Reset Form
+                taskInput.value = '';
+                tagsInput.value = '';
+                alertTimeInput.value = '';
+                
+            } catch (err) {
+                console.error(err);
+                showToast("Lỗi khi thêm việc", "error");
+                // Nếu lỗi khi ghi online, switch offline
+                if (!isOfflineMode) switchToOfflineMode("Lỗi ghi dữ liệu. Chuyển sang Offline.");
+            } finally {
+                btnAdd.disabled = false;
+                btnAdd.innerHTML = '<i class="fas fa-plus mr-2"></i> Thêm Công Việc';
+            }
         }
 
-        // --- Rendering ---
+        // 3. Update Data
+        async function toggleTodoStatus(id, isCompleted) {
+            try {
+                if (isOfflineMode) {
+                    const idx = allTodos.findIndex(t => t.id === id);
+                    if (idx > -1) {
+                        allTodos[idx].completed = isCompleted;
+                        saveToLocalStorage();
+                        processSnapshotData(allTodos);
+                        showToast(isCompleted ? "Đã xong!" : "Đã mở lại", "success");
+                    }
+                } else {
+                    if (!currentUser) return;
+                    const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', id);
+                    await updateDoc(docRef, { completed: isCompleted });
+                    showToast(isCompleted ? "Đã xong!" : "Đã mở lại", "success");
+                }
+            } catch (err) {
+                console.error(err);
+                showToast("Lỗi cập nhật", "error");
+            }
+        }
+
+        // 4. Delete Data
+        async function deleteTodo(id) {
+            if (!confirm("Bạn có chắc muốn xóa?")) return;
+            try {
+                if (isOfflineMode) {
+                    allTodos = allTodos.filter(t => t.id !== id);
+                    saveToLocalStorage();
+                    processSnapshotData(allTodos);
+                    showToast("Đã xóa (Offline)", "info");
+                } else {
+                    if (!currentUser) return;
+                    const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', id);
+                    await deleteDoc(docRef);
+                    showToast("Đã xóa trên Cloud", "info");
+                }
+            } catch (err) {
+                console.error(err);
+                showToast("Lỗi khi xóa", "error");
+            }
+        }
+
+        // 5. Batch Delete
+        window.clearAllCompleted = async function(event) {
+            event.stopPropagation();
+            const completedTodos = allTodos.filter(t => t.completed);
+            if (completedTodos.length === 0) return;
+
+            if(!confirm(`Xóa vĩnh viễn ${completedTodos.length} công việc đã xong?`)) return;
+
+            try {
+                if (isOfflineMode) {
+                    allTodos = allTodos.filter(t => !t.completed);
+                    saveToLocalStorage();
+                    processSnapshotData(allTodos);
+                    showToast("Đã dọn dẹp (Offline)", "info");
+                } else {
+                    if (!currentUser) return;
+                    const batch = writeBatch(db);
+                    completedTodos.forEach(t => {
+                        const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', t.id);
+                        batch.delete(docRef);
+                    });
+                    await batch.commit();
+                    showToast("Đã dọn dẹp trên Cloud", "info");
+                }
+            } catch (err) {
+                showToast("Lỗi xóa hàng loạt", "error");
+            }
+        }
+
+        function saveToLocalStorage() {
+            localStorage.setItem('todos_offline', JSON.stringify(allTodos));
+        }
+
+        // --- Rendering (Shared) ---
         function renderTodoItem(todo, container, isCompleted) {
             const tagsHtml = (todo.tags || []).map(tag => 
                 `<span class="inline-block bg-blue-50 text-blue-600 text-[10px] font-semibold px-2 py-0.5 rounded border border-blue-100 mr-1">#${tag}</span>`
@@ -182,7 +452,7 @@
                     <i class="fas fa-clock mr-1"></i> ${todo.alertTime}
                    </span>` 
                 : '';
-
+            
             const createdTimeHtml = `<span class="text-[10px] text-gray-400 ml-1 inline-flex items-center" title="Thời gian tạo"><i class="far fa-calendar-alt mr-1"></i>${formatDate(todo.createdAt)}</span>`;
 
             const el = document.createElement('div');
@@ -191,7 +461,7 @@
                 el.className = "group flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 transition hover:shadow-sm";
                 el.innerHTML = `
                     <div class="flex items-center space-x-3 flex-1 overflow-hidden opacity-60 group-hover:opacity-100 transition-opacity">
-                        <button class="text-green-600 hover:text-green-700 transition focus:outline-none toggle-btn" onclick="toggleTodoStatus(${todo.id})" title="Đánh dấu chưa xong">
+                        <button class="text-green-600 hover:text-green-700 transition focus:outline-none toggle-btn" data-id="${todo.id}" data-status="false" title="Đánh dấu chưa xong">
                             <i class="fas fa-check-square text-lg"></i>
                         </button>
                         <div class="flex-1 min-w-0">
@@ -202,7 +472,7 @@
                             </div>
                         </div>
                     </div>
-                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full transition delete-btn" onclick="deleteTodo(${todo.id})" title="Xóa vĩnh viễn">
+                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full transition delete-btn" data-id="${todo.id}" title="Xóa vĩnh viễn">
                         <i class="fas fa-times"></i>
                     </button>
                 `;
@@ -210,7 +480,7 @@
                 el.className = "task-enter bg-white p-4 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-start justify-between group transition-all hover:shadow-md hover:translate-y-[-2px]";
                 el.innerHTML = `
                     <div class="flex items-start space-x-3 flex-1 overflow-hidden">
-                        <button class="mt-0.5 text-gray-300 hover:text-green-500 transition focus:outline-none toggle-btn" onclick="toggleTodoStatus(${todo.id})" title="Đánh dấu hoàn thành">
+                        <button class="mt-0.5 text-gray-300 hover:text-green-500 transition focus:outline-none toggle-btn" data-id="${todo.id}" data-status="true" title="Đánh dấu hoàn thành">
                             <i class="far fa-square text-xl"></i>
                         </button>
                         <div class="flex-1 min-w-0">
@@ -222,16 +492,26 @@
                             </div>
                         </div>
                     </div>
-                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition opacity-0 group-hover:opacity-100 delete-btn" onclick="deleteTodo(${todo.id})" title="Xóa">
+                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition opacity-0 group-hover:opacity-100 delete-btn" data-id="${todo.id}" title="Xóa">
                         <i class="fas fa-trash-alt"></i>
                     </button>
                 `;
             }
 
+            el.querySelector('.toggle-btn').addEventListener('click', (e) => {
+                const id = e.currentTarget.dataset.id;
+                const newStatus = e.currentTarget.dataset.status === "true";
+                toggleTodoStatus(id, newStatus);
+            });
+            el.querySelector('.delete-btn').addEventListener('click', (e) => {
+                const id = e.currentTarget.dataset.id;
+                deleteTodo(id);
+            });
+
             container.appendChild(el);
         }
 
-        // --- Tag Management Functions ---
+        // --- Tag & UI Utilities ---
         function updateTagSelectors() {
             tagSuggestions.innerHTML = '';
             tagSelect.innerHTML = '<option value="">Chọn tag...</option>';
@@ -239,20 +519,16 @@
 
             if (availableTags.size > 0) {
                 const sortedTags = Array.from(availableTags).sort();
-                
                 sortedTags.forEach(tag => {
-                    // Datalist option
                     const opt = document.createElement('option');
                     opt.value = tag;
                     tagSuggestions.appendChild(opt);
 
-                    // Select option
                     const selectOpt = document.createElement('option');
                     selectOpt.value = tag;
                     selectOpt.textContent = tag;
                     tagSelect.appendChild(selectOpt);
 
-                    // Chip button
                     const tagBtn = document.createElement('button');
                     tagBtn.type = "button";
                     tagBtn.className = "text-xs bg-white border border-indigo-100 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-50 transition";
@@ -277,74 +553,12 @@
             const current = tagsInput.value;
             if (current) {
                 const existingTags = current.split(',').map(t => t.trim());
-                if (!existingTags.includes(tag)) {
-                    tagsInput.value = current + ", " + tag;
-                }
+                if (!existingTags.includes(tag)) tagsInput.value = current + ", " + tag;
             } else {
                 tagsInput.value = tag;
             }
         }
 
-        // --- Actions ---
-
-        function addTodo(e) {
-            e.preventDefault();
-            
-            const text = taskInput.value.trim();
-            if (!text) return;
-
-            const tagsText = tagsInput.value.trim();
-            const tags = tagsText ? tagsText.split(',').map(tag => tag.trim()).filter(tag => tag !== "") : [];
-
-            const newTodo = {
-                id: Date.now(),
-                text: text,
-                completed: false,
-                createdAt: new Date().toISOString(),
-                alertTime: alertTimeInput.value || null,
-                tags: tags
-            };
-
-            allTodos.unshift(newTodo);
-            saveTodos();
-            
-            taskInput.value = '';
-            tagsInput.value = '';
-            alertTimeInput.value = '';
-            showToast("Đã thêm công việc!", "success");
-        }
-
-        window.toggleTodoStatus = function(id) {
-            allTodos = allTodos.map(t => {
-                if (t.id === id) return { ...t, completed: !t.completed };
-                return t;
-            });
-            saveTodos();
-            const todo = allTodos.find(t => t.id === id);
-            showToast(todo.completed ? "Đã hoàn thành!" : "Đã mở lại công việc", "success");
-        }
-
-        window.deleteTodo = function(id) {
-            if (!confirm("Bạn có chắc muốn xóa?")) return;
-            allTodos = allTodos.filter(t => t.id !== id);
-            saveTodos();
-            showToast("Đã xóa công việc", "info");
-        }
-        
-        window.clearAllCompleted = function(event) {
-            event.stopPropagation();
-            
-            const completedCount = allTodos.filter(t => t.completed).length;
-            if (completedCount === 0) return;
-
-            if(!confirm(`Xóa vĩnh viễn ${completedCount} công việc đã xong?`)) return;
-
-            allTodos = allTodos.filter(t => !t.completed);
-            saveTodos();
-            showToast("Đã dọn dẹp danh sách", "info");
-        }
-
-        // --- UI Utilities ---
         function updateDateTime() {
             const now = new Date();
             const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
@@ -388,10 +602,7 @@
             const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
             
             allTodos.forEach(todo => {
-                // Check alert time logic
                 if (!todo.completed && todo.alertTime === currentTimeStr) {
-                     // Check if already alerted today (optional check, here we just check time match)
-                     // To make it robust, you could add 'lastAlerted' timestamp to todo item
                     if (Notification.permission === "granted") {
                         new Notification("Nhắc nhở công việc", { body: todo.text });
                     }
@@ -401,6 +612,11 @@
         }, 5000);
 
         todoForm.addEventListener('submit', addTodo);
+        
+        // Start App
+        initApp();
+        updateDateTime();
+
     </script>
 </body>
 </html>

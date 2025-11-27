@@ -163,6 +163,14 @@
             updateTagSelectors();
         }
 
+        function formatDate(isoString) {
+            if (!isoString) return '';
+            const date = new Date(isoString);
+            return date.toLocaleString('vi-VN', { 
+                hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' 
+            });
+        }
+
         // --- Rendering ---
         function renderTodoItem(todo, container, isCompleted) {
             const tagsHtml = (todo.tags || []).map(tag => 
@@ -175,6 +183,8 @@
                    </span>` 
                 : '';
 
+            const createdTimeHtml = `<span class="text-[10px] text-gray-400 ml-1 inline-flex items-center" title="Thời gian tạo"><i class="far fa-calendar-alt mr-1"></i>${formatDate(todo.createdAt)}</span>`;
+
             const el = document.createElement('div');
             
             if (isCompleted) {
@@ -186,7 +196,10 @@
                         </button>
                         <div class="flex-1 min-w-0">
                             <p class="text-gray-500 line-through text-sm truncate">${todo.text}</p>
-                            <div class="flex mt-1 opacity-50 grayscale">${tagsHtml}</div>
+                            <div class="flex mt-1 opacity-50 grayscale flex-wrap items-center">
+                                ${tagsHtml}
+                                ${createdTimeHtml}
+                            </div>
                         </div>
                     </div>
                     <button class="text-gray-300 hover:text-red-500 p-2 rounded-full transition delete-btn" onclick="deleteTodo(${todo.id})" title="Xóa vĩnh viễn">
@@ -205,6 +218,7 @@
                             <div class="flex flex-wrap items-center mt-2 gap-y-1">
                                 ${alertHtml}
                                 ${tagsHtml}
+                                ${createdTimeHtml}
                             </div>
                         </div>
                     </div>

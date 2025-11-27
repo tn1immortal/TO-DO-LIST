@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quản Lý Công Việc (Pro)</title>
+    <title>Quản Lý Công Việc (Pro) - Quick Tags</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -22,6 +22,10 @@
         
         /* Styles cho bảng báo cáo (ẩn trên UI chính, dùng khi in/xuất) */
         #export-content { display: none; }
+
+        /* Animation cho input tag nhập nhanh */
+        .tag-input-anim { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; width: 0; } to { opacity: 1; width: 80px; } }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen py-4 px-3 sm:px-6 lg:px-8">
@@ -58,7 +62,7 @@
                 </div>
             </div>
 
-            <!-- Form -->
+            <!-- Form Thêm Mới -->
             <form id="todo-form" class="space-y-3">
                 <input type="text" id="task-input" class="w-full border border-gray-200 bg-gray-50 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition" placeholder="Nhập công việc cần làm..." required>
                 
@@ -66,7 +70,7 @@
                     <div class="flex-1 relative">
                         <div class="flex gap-2">
                             <!-- Input Tag có hỗ trợ Datalist -->
-                            <input type="text" id="tags-input" list="tag-suggestions" class="flex-1 border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Thẻ (hoặc chọn bên phải)">
+                            <input type="text" id="tags-input" list="tag-suggestions" class="flex-1 border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Thẻ (tag1, tag2)">
                             <!-- Dropdown chọn Tag cũ -->
                             <select id="tag-select" onchange="selectTagFromDropdown(this)" class="w-1/3 border border-gray-200 bg-white text-gray-600 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer">
                                 <option value="">Chọn tag...</option>
@@ -114,6 +118,55 @@
             </div>
             
             <div id="completed-list" class="space-y-2 opacity-75 bg-gray-50 p-4 rounded-xl hidden"></div>
+        </div>
+    </div>
+
+    <!-- === EDIT MODAL === -->
+    <div id="edit-modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 animate-[slideIn_0.2s_ease-out]">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h3 class="text-lg font-bold text-gray-800"><i class="fas fa-edit text-indigo-600 mr-2"></i>Chỉnh sửa công việc</h3>
+                <button onclick="closeEditModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Edit Text -->
+                <div>
+                    <label class="block text-xs font-semibold text-gray-500 mb-1">Nội dung</label>
+                    <input type="text" id="edit-task-text" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+
+                <!-- Edit Time -->
+                <div>
+                    <label class="block text-xs font-semibold text-gray-500 mb-1">Giờ nhắc nhở</label>
+                    <input type="time" id="edit-task-time" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+
+                <!-- Edit Tags Section -->
+                <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <label class="block text-xs font-semibold text-gray-500 mb-2">Quản lý Thẻ (Tags)</label>
+                    
+                    <!-- Current Tags List -->
+                    <div id="edit-tags-list" class="flex flex-wrap gap-2 mb-3 min-h-[30px]">
+                        <!-- Tags will be rendered here via JS -->
+                    </div>
+
+                    <!-- Add New Tag Input -->
+                    <div class="flex gap-2">
+                        <input type="text" id="edit-new-tag" class="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Nhập tag mới...">
+                        <button onclick="addTagInEdit()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+                            <i class="fas fa-plus"></i> Thêm
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-end space-x-3 border-t pt-4">
+                <button onclick="closeEditModal()" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-sm font-medium">Hủy bỏ</button>
+                <button onclick="saveTaskEdit()" id="btn-save-edit" class="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 text-sm font-bold shadow-lg flex items-center">
+                    <i class="fas fa-save mr-2"></i> Lưu thay đổi
+                </button>
+            </div>
         </div>
     </div>
 
@@ -230,6 +283,10 @@
         let allTodos = []; 
         let availableTags = new Set();
         const appId = 'my-todo-app'; 
+
+        // Variables for Editing
+        let currentEditingId = null;
+        let tempEditingTags = [];
 
         // DOM Refs
         const todoForm = document.getElementById('todo-form');
@@ -364,14 +421,10 @@
             const modal = document.getElementById('export-modal');
             const startInput = document.getElementById('export-start');
             const endInput = document.getElementById('export-end');
-            
-            // Set default dates: Đầu tháng đến Hôm nay
             const today = new Date();
             const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-            
             endInput.valueAsDate = today;
             startInput.valueAsDate = firstDay;
-            
             modal.classList.remove('hidden');
         }
 
@@ -382,12 +435,9 @@
         window.performExport = function() {
             const startDate = new Date(document.getElementById('export-start').value);
             const endDate = new Date(document.getElementById('export-end').value);
-            // Set end date to end of day
             endDate.setHours(23, 59, 59, 999);
-            
             const format = document.querySelector('input[name="export-format"]:checked').value;
             
-            // 1. Filter Data
             const filteredData = allTodos.filter(t => {
                 const tDate = new Date(t.createdAt);
                 return tDate >= startDate && tDate <= endDate;
@@ -398,15 +448,12 @@
                 return;
             }
 
-            // 2. Generate Template Content
             document.getElementById('exp-user').textContent = isOfflineMode ? "Người dùng Offline" : "Người dùng Cloud";
             document.getElementById('exp-time').textContent = new Date().toLocaleString('vi-VN');
             document.getElementById('exp-range').textContent = `${startDate.toLocaleDateString('vi-VN')} - ${endDate.toLocaleDateString('vi-VN')}`;
             
             const tbody = document.getElementById('exp-tbody');
             tbody.innerHTML = '';
-            
-            // Sort by Date Ascending for report
             const reportData = [...filteredData].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
             reportData.forEach((t, index) => {
@@ -427,9 +474,7 @@
             });
 
             const element = document.getElementById('export-template');
-            element.classList.remove('hidden'); // Show temp for generation
-
-            // 3. Export Switch
+            element.classList.remove('hidden'); 
             const fileName = `Bao_Cao_Cong_Viec_${new Date().getTime()}`;
 
             if (format === 'pdf') {
@@ -446,10 +491,9 @@
                     showToast("Đã xuất file PDF thành công!", "success");
                 });
             } else if (format === 'doc') {
-                const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export HTML to Word Document with JavaScript</title></head><body>";
+                const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export</title></head><body>";
                 const footer = "</body></html>";
                 const sourceHTML = header + element.innerHTML + footer;
-                
                 const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML);
                 const fileDownload = document.createElement("a");
                 document.body.appendChild(fileDownload);
@@ -457,7 +501,6 @@
                 fileDownload.download = `${fileName}.doc`;
                 fileDownload.click();
                 document.body.removeChild(fileDownload);
-                
                 element.classList.add('hidden');
                 closeExportModal();
                 showToast("Đã tải xuống file Word!", "success");
@@ -470,13 +513,13 @@
                 fileDownload.download = `${fileName}.html`;
                 fileDownload.click();
                 document.body.removeChild(fileDownload);
-                
                 element.classList.add('hidden');
                 closeExportModal();
                 showToast("Đã tải xuống file HTML!", "success");
             }
         }
 
+        // --- ADD TODO ---
         async function addTodo(e) {
             e.preventDefault();
             const text = taskInput.value.trim();
@@ -508,6 +551,206 @@
                 btnAdd.innerHTML = '<i class="fas fa-plus mr-2"></i> Thêm Công Việc';
             }
         }
+
+        // --- QUICK TAGS FEATURE ---
+        window.removeTag = async function(id, tagToRemove) {
+            const todo = allTodos.find(t => t.id === id);
+            if (!todo) return;
+            
+            const newTags = (todo.tags || []).filter(t => t !== tagToRemove);
+            
+            try {
+                if (isOfflineMode) {
+                    const idx = allTodos.findIndex(t => t.id === id);
+                    if (idx > -1) {
+                        allTodos[idx].tags = newTags;
+                        saveToLocalStorage();
+                        processSnapshotData(allTodos);
+                    }
+                } else {
+                    if (!currentUser) return;
+                    const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', id);
+                    await updateDoc(docRef, { tags: newTags });
+                }
+            } catch (err) { showToast("Lỗi xóa tag", "error"); }
+        }
+
+        window.startAddTag = function(btn, id) {
+            const inputHtml = `<input type="text" id="quick-tag-input-${id}" class="tag-input-anim text-[10px] border border-indigo-300 rounded px-1.5 py-0.5 outline-none text-gray-700 bg-white shadow-sm focus:ring-1 focus:ring-indigo-500 w-20" placeholder="New tag..." onkeydown="handleTagKey(event, '${id}')" onblur="confirmAddTag('${id}', this)">`;
+            btn.outerHTML = inputHtml;
+            setTimeout(() => {
+                const input = document.getElementById(`quick-tag-input-${id}`);
+                if (input) input.focus();
+            }, 50);
+        }
+
+        window.handleTagKey = function(e, id) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.target.blur(); // Triggers confirmAddTag
+            } else if (e.key === 'Escape') {
+                // Revert UI by doing nothing (let snapshot update) or manually blurring without save?
+                // For simplicity, just blur. Logic inside confirmAddTag will handle empty/cancel logic if implemented, but here we just want to cancel.
+                // Actually, simplest is to reload the item. Since we didn't save, just trigger a re-render or let it be.
+                // But blur triggers save. So we need a flag?
+                // Let's just allow empty blur to be "Cancel".
+                e.target.value = ''; // Clear value so it cancels
+                e.target.blur();
+            }
+        }
+
+        window.confirmAddTag = async function(id, inputEl) {
+            const newTag = inputEl.value.trim();
+            if (!newTag) {
+                // If empty, we just refresh the UI to show the button again (handled by re-render or manual replacement)
+                // Since we haven't updated data, no snapshot event fires. We must manually re-render or fetch.
+                // Quickest fix: re-process local data to reset UI.
+                processSnapshotData(allTodos); 
+                return;
+            }
+
+            const todo = allTodos.find(t => t.id === id);
+            if (!todo) return;
+
+            const currentTags = todo.tags || [];
+            if (currentTags.includes(newTag)) {
+                showToast("Tag đã tồn tại!", "warning");
+                processSnapshotData(allTodos);
+                return;
+            }
+
+            const newTags = [...currentTags, newTag];
+
+            try {
+                if (isOfflineMode) {
+                    const idx = allTodos.findIndex(t => t.id === id);
+                    if (idx > -1) {
+                        allTodos[idx].tags = newTags;
+                        saveToLocalStorage();
+                        processSnapshotData(allTodos);
+                        showToast("Đã thêm tag (Offline)", "success");
+                    }
+                } else {
+                    if (!currentUser) return;
+                    const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', id);
+                    await updateDoc(docRef, { tags: newTags });
+                    showToast("Đã thêm tag", "success");
+                }
+            } catch (err) { 
+                console.error(err);
+                showToast("Lỗi thêm tag", "error"); 
+                processSnapshotData(allTodos); // Revert UI
+            }
+        }
+
+        // --- EDIT FEATURE LOGIC ---
+        window.openEditModal = function(id) {
+            const task = allTodos.find(t => t.id === id);
+            if (!task) return;
+
+            currentEditingId = id;
+            tempEditingTags = [...(task.tags || [])]; // clone array
+
+            document.getElementById('edit-task-text').value = task.text;
+            document.getElementById('edit-task-time').value = task.alertTime || "";
+            document.getElementById('edit-new-tag').value = "";
+            
+            renderEditTags();
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        window.closeEditModal = function() {
+            document.getElementById('edit-modal').classList.add('hidden');
+            currentEditingId = null;
+            tempEditingTags = [];
+        }
+
+        window.renderEditTags = function() {
+            const container = document.getElementById('edit-tags-list');
+            container.innerHTML = '';
+            if (tempEditingTags.length === 0) {
+                container.innerHTML = '<span class="text-xs text-gray-400 italic">Không có tag</span>';
+                return;
+            }
+            tempEditingTags.forEach((tag, index) => {
+                const badge = document.createElement('div');
+                badge.className = 'bg-indigo-100 text-indigo-700 text-xs font-semibold px-2 py-1 rounded flex items-center';
+                badge.innerHTML = `
+                    <span class="mr-1">#${tag}</span>
+                    <button onclick="removeTagFromEdit(${index})" class="text-indigo-400 hover:text-red-500 transition focus:outline-none">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+                container.appendChild(badge);
+            });
+        }
+
+        window.removeTagFromEdit = function(index) {
+            tempEditingTags.splice(index, 1);
+            renderEditTags();
+        }
+
+        window.addTagInEdit = function() {
+            const input = document.getElementById('edit-new-tag');
+            const newTag = input.value.trim();
+            if (newTag) {
+                if (!tempEditingTags.includes(newTag)) {
+                    tempEditingTags.push(newTag);
+                    renderEditTags();
+                    input.value = '';
+                } else {
+                    showToast("Tag đã tồn tại!", "warning");
+                }
+            }
+        }
+
+        window.saveTaskEdit = async function() {
+            if (!currentEditingId) return;
+            const newText = document.getElementById('edit-task-text').value.trim();
+            if (!newText) {
+                showToast("Nội dung không được để trống", "error");
+                return;
+            }
+            const newTime = document.getElementById('edit-task-time').value;
+
+            // Updates logic
+            const updateData = {
+                text: newText,
+                alertTime: newTime || null,
+                tags: tempEditingTags
+            };
+
+            const btnSave = document.getElementById('btn-save-edit');
+            btnSave.disabled = true;
+            btnSave.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Đang lưu...';
+
+            try {
+                if (isOfflineMode) {
+                    // Update Local
+                    const idx = allTodos.findIndex(t => t.id === currentEditingId);
+                    if (idx > -1) {
+                        allTodos[idx] = { ...allTodos[idx], ...updateData };
+                        saveToLocalStorage();
+                        processSnapshotData(allTodos);
+                        showToast("Đã cập nhật (Offline)", "success");
+                    }
+                } else {
+                    // Update Cloud
+                    if (!currentUser) return;
+                    const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', currentEditingId);
+                    await updateDoc(docRef, updateData);
+                    showToast("Đã cập nhật trên Cloud", "success");
+                }
+                closeEditModal();
+            } catch (err) {
+                console.error(err);
+                showToast("Lỗi khi cập nhật", "error");
+            } finally {
+                btnSave.disabled = false;
+                btnSave.innerHTML = '<i class="fas fa-save mr-2"></i> Lưu thay đổi';
+            }
+        }
+        // --- END EDIT LOGIC ---
 
         async function toggleTodoStatus(id, isCompleted) {
             try {
@@ -572,11 +815,27 @@
         function saveToLocalStorage() { localStorage.setItem('todos_offline', JSON.stringify(allTodos)); }
 
         function renderTodoItem(todo, container, isCompleted) {
-            const tagsHtml = (todo.tags || []).map(tag => `<span class="inline-block bg-blue-50 text-blue-600 text-[10px] font-semibold px-2 py-0.5 rounded border border-blue-100 mr-1">#${tag}</span>`).join('');
+            const tagsHtml = (todo.tags || []).map(tag => `
+                <span class="inline-flex items-center bg-blue-50 text-blue-600 text-[10px] font-semibold px-2 py-0.5 rounded border border-blue-100 mr-1 group relative">
+                    #${tag}
+                    <button onclick="event.stopPropagation(); removeTag('${todo.id}', '${tag}')" class="ml-1 text-blue-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity focus:outline-none" title="Xóa tag">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </span>
+            `).join('');
+            
+            // Nút thêm tag trực tiếp
+            const addTagBtn = `<button onclick="event.stopPropagation(); startAddTag(this, '${todo.id}')" class="inline-flex items-center text-[10px] text-gray-400 hover:text-indigo-600 border border-transparent hover:border-indigo-100 hover:bg-indigo-50 px-1 rounded transition" title="Thêm tag nhanh"><i class="fas fa-plus"></i></button>`;
+
             const alertHtml = todo.alertTime ? `<span class="inline-flex items-center text-[10px] ${isCompleted ? 'text-gray-400' : 'text-orange-600 bg-orange-50'} px-2 py-0.5 rounded mr-1"><i class="fas fa-clock mr-1"></i> ${todo.alertTime}</span>` : '';
             const createdTimeHtml = `<span class="text-[10px] text-gray-400 ml-1 inline-flex items-center" title="Thời gian tạo"><i class="far fa-calendar-alt mr-1"></i>${formatDate(todo.createdAt)}</span>`;
+            
             const el = document.createElement('div');
             
+            // Common Actions HTML
+            const deleteBtnHtml = `<button class="text-gray-300 hover:text-red-500 p-2 rounded-full transition delete-btn" data-id="${todo.id}" title="Xóa vĩnh viễn"><i class="fas fa-times"></i></button>`;
+            const editBtnHtml = `<button onclick="openEditModal('${todo.id}')" class="text-gray-300 hover:text-blue-500 p-2 rounded-full transition mr-1" title="Chỉnh sửa chi tiết"><i class="fas fa-edit"></i></button>`;
+
             if (isCompleted) {
                 el.className = "group flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 transition hover:shadow-sm";
                 el.innerHTML = `
@@ -584,10 +843,17 @@
                         <button class="text-green-600 hover:text-green-700 transition focus:outline-none toggle-btn" data-id="${todo.id}" data-status="false" title="Đánh dấu chưa xong"><i class="fas fa-check-square text-lg"></i></button>
                         <div class="flex-1 min-w-0">
                             <p class="text-gray-500 line-through text-sm truncate">${todo.text}</p>
-                            <div class="flex mt-1 opacity-50 grayscale flex-wrap items-center">${tagsHtml}${createdTimeHtml}</div>
+                            <div class="flex mt-1 opacity-50 grayscale flex-wrap items-center">
+                                ${tagsHtml}
+                                ${addTagBtn}
+                                ${createdTimeHtml}
+                            </div>
                         </div>
                     </div>
-                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full transition delete-btn" data-id="${todo.id}" title="Xóa vĩnh viễn"><i class="fas fa-times"></i></button>`;
+                    <div class="flex items-center">
+                        ${editBtnHtml}
+                        ${deleteBtnHtml}
+                    </div>`;
             } else {
                 el.className = "task-enter bg-white p-4 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-start justify-between group transition-all hover:shadow-md hover:translate-y-[-2px]";
                 el.innerHTML = `
@@ -595,10 +861,18 @@
                         <button class="mt-0.5 text-gray-300 hover:text-green-500 transition focus:outline-none toggle-btn" data-id="${todo.id}" data-status="true" title="Đánh dấu hoàn thành"><i class="far fa-square text-xl"></i></button>
                         <div class="flex-1 min-w-0">
                             <p class="text-gray-800 font-medium text-base leading-tight break-words">${todo.text}</p>
-                            <div class="flex flex-wrap items-center mt-2 gap-y-1">${alertHtml}${tagsHtml}${createdTimeHtml}</div>
+                            <div class="flex flex-wrap items-center mt-2 gap-y-1">
+                                ${alertHtml}
+                                ${tagsHtml}
+                                ${addTagBtn}
+                                ${createdTimeHtml}
+                            </div>
                         </div>
                     </div>
-                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition opacity-0 group-hover:opacity-100 delete-btn" data-id="${todo.id}" title="Xóa"><i class="fas fa-trash-alt"></i></button>`;
+                    <div class="flex items-center opacity-0 group-hover:opacity-100 transition">
+                         ${editBtnHtml}
+                         <button class="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition delete-btn" data-id="${todo.id}" title="Xóa"><i class="fas fa-trash-alt"></i></button>
+                    </div>`;
             }
             el.querySelector('.toggle-btn').addEventListener('click', (e) => { const id = e.currentTarget.dataset.id; const newStatus = e.currentTarget.dataset.status === "true"; toggleTodoStatus(id, newStatus); });
             el.querySelector('.delete-btn').addEventListener('click', (e) => { const id = e.currentTarget.dataset.id; deleteTodo(id); });

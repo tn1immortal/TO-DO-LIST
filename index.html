@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quản Lý Công Việc (Đồng Bộ Cloud)</title>
+    <title>Quản Lý Công Việc (Offline)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -15,8 +15,6 @@
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .task-enter { animation: slideIn 0.3s ease-out forwards; }
         @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .loader { border-top-color: #4f46e5; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
-        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen py-4 px-3 sm:px-6 lg:px-8">
@@ -27,9 +25,9 @@
             <div class="absolute top-0 left-0 w-1 h-full bg-indigo-600"></div>
             <div class="flex justify-between items-start mb-4">
                 <div>
-                    <h1 class="text-2xl font-bold text-gray-800"><i class="fas fa-cloud text-indigo-500 mr-2"></i>Todo Cloud</h1>
-                    <p class="text-xs text-gray-500 mt-1" id="current-date">Đang kết nối máy chủ...</p>
-                    <p class="text-[10px] text-gray-400 mt-0.5">ID Người dùng: <span id="user-id-display">...</span></p>
+                    <h1 class="text-2xl font-bold text-gray-800"><i class="fas fa-laptop-house text-indigo-500 mr-2"></i>Todo Local</h1>
+                    <p class="text-xs text-gray-500 mt-1" id="current-date">...</p>
+                    <p class="text-[10px] text-gray-400 mt-0.5"><i class="fas fa-database mr-1"></i>Dữ liệu lưu trên máy này</p>
                 </div>
                 <button onclick="requestNotificationPermission()" id="btn-notify" class="text-xs bg-gray-100 text-gray-600 px-3 py-2 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition">
                     <i class="fas fa-bell"></i>
@@ -64,15 +62,10 @@
                     </div>
                 </div>
 
-                <button type="submit" id="btn-add" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md transition duration-200 flex justify-center items-center disabled:opacity-50">
+                <button type="submit" id="btn-add" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md transition duration-200 flex justify-center items-center">
                     <i class="fas fa-plus mr-2"></i> Thêm Công Việc
                 </button>
             </form>
-        </div>
-
-        <!-- Loading Indicator -->
-        <div id="loading-indicator" class="flex justify-center py-4">
-            <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-8 w-8"></div>
         </div>
 
         <!-- SECTION: Đang thực hiện -->
@@ -106,19 +99,7 @@
     <!-- Toast Notification -->
     <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
 
-    <!-- Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, where } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
-
-        // --- Config ---
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
+    <script>
         // --- DOM Elements ---
         const todoForm = document.getElementById('todo-form');
         const taskInput = document.getElementById('task-input');
@@ -129,81 +110,57 @@
         const todoListEl = document.getElementById('todo-list');
         const completedListEl = document.getElementById('completed-list');
         const quickTagsEl = document.getElementById('quick-tags');
-        const loadingIndicator = document.getElementById('loading-indicator');
         const btnAdd = document.getElementById('btn-add');
-        const userIdDisplay = document.getElementById('user-id-display');
-
-        let currentUser = null;
-        let allTodos = []; 
+        
+        // --- State Management (LocalStorage) ---
+        let allTodos = JSON.parse(localStorage.getItem('todos')) || [];
         let availableTags = new Set(); 
 
-        // --- Authentication ---
-        const initAuth = async () => {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
-        };
-        initAuth();
+        // --- Init ---
+        updateDateTime();
+        refreshUI();
 
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                currentUser = user;
-                userIdDisplay.textContent = user.uid.substring(0, 8) + "...";
-                updateDateTime();
-                setupRealtimeListener(user.uid);
-            }
-        });
+        // --- Functions ---
 
-        // --- Firestore Realtime Listener ---
-        function setupRealtimeListener(userId) {
-            const q = query(
-                collection(db, 'artifacts', appId, 'users', userId, 'todos'),
-                orderBy('createdAt', 'desc')
-            );
+        function saveTodos() {
+            localStorage.setItem('todos', JSON.stringify(allTodos));
+            refreshUI();
+        }
 
-            onSnapshot(q, (snapshot) => {
-                loadingIndicator.classList.add('hidden');
-                allTodos = [];
-                availableTags.clear();
-                
-                // Clear lists
-                todoListEl.innerHTML = '';
-                completedListEl.innerHTML = '';
-                
-                let todoCount = 0;
-                let doneCount = 0;
+        function refreshUI() {
+            // Reset Tags Set
+            availableTags.clear();
+            
+            // Clear lists
+            todoListEl.innerHTML = '';
+            completedListEl.innerHTML = '';
+            
+            let todoCount = 0;
+            let doneCount = 0;
 
-                snapshot.forEach((doc) => {
-                    const data = doc.data();
-                    const todo = { id: doc.id, ...data };
-                    allTodos.push(todo);
-                    
-                    // Collect Tags
-                    if (data.tags && Array.isArray(data.tags)) {
-                        data.tags.forEach(tag => availableTags.add(tag));
-                    }
+            // Sort todos: Mới nhất lên đầu
+            allTodos.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-                    if (data.completed) {
-                        doneCount++;
-                        renderTodoItem(todo, completedListEl, true);
-                    } else {
-                        todoCount++;
-                        renderTodoItem(todo, todoListEl, false);
-                    }
-                });
+            allTodos.forEach((todo) => {
+                // Collect Tags
+                if (todo.tags && Array.isArray(todo.tags)) {
+                    todo.tags.forEach(tag => availableTags.add(tag));
+                }
 
-                document.getElementById('count-todo').textContent = todoCount;
-                document.getElementById('count-done').textContent = doneCount;
-
-                // Cập nhật gợi ý tags và danh sách chọn
-                updateTagSelectors();
-
-            }, (error) => {
-                console.error("Lỗi tải dữ liệu:", error);
-                showToast("Lỗi kết nối dữ liệu!", "error");
+                if (todo.completed) {
+                    doneCount++;
+                    renderTodoItem(todo, completedListEl, true);
+                } else {
+                    todoCount++;
+                    renderTodoItem(todo, todoListEl, false);
+                }
             });
+
+            document.getElementById('count-todo').textContent = todoCount;
+            document.getElementById('count-done').textContent = doneCount;
+
+            // Cập nhật gợi ý tags và danh sách chọn
+            updateTagSelectors();
         }
 
         // --- Rendering ---
@@ -224,7 +181,7 @@
                 el.className = "group flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 transition hover:shadow-sm";
                 el.innerHTML = `
                     <div class="flex items-center space-x-3 flex-1 overflow-hidden opacity-60 group-hover:opacity-100 transition-opacity">
-                        <button class="text-green-600 hover:text-green-700 transition focus:outline-none toggle-btn" data-id="${todo.id}" data-status="false" title="Đánh dấu chưa xong">
+                        <button class="text-green-600 hover:text-green-700 transition focus:outline-none toggle-btn" onclick="toggleTodoStatus(${todo.id})" title="Đánh dấu chưa xong">
                             <i class="fas fa-check-square text-lg"></i>
                         </button>
                         <div class="flex-1 min-w-0">
@@ -232,7 +189,7 @@
                             <div class="flex mt-1 opacity-50 grayscale">${tagsHtml}</div>
                         </div>
                     </div>
-                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full transition delete-btn" data-id="${todo.id}" title="Xóa vĩnh viễn">
+                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full transition delete-btn" onclick="deleteTodo(${todo.id})" title="Xóa vĩnh viễn">
                         <i class="fas fa-times"></i>
                     </button>
                 `;
@@ -240,7 +197,7 @@
                 el.className = "task-enter bg-white p-4 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-start justify-between group transition-all hover:shadow-md hover:translate-y-[-2px]";
                 el.innerHTML = `
                     <div class="flex items-start space-x-3 flex-1 overflow-hidden">
-                        <button class="mt-0.5 text-gray-300 hover:text-green-500 transition focus:outline-none toggle-btn" data-id="${todo.id}" data-status="true" title="Đánh dấu hoàn thành">
+                        <button class="mt-0.5 text-gray-300 hover:text-green-500 transition focus:outline-none toggle-btn" onclick="toggleTodoStatus(${todo.id})" title="Đánh dấu hoàn thành">
                             <i class="far fa-square text-xl"></i>
                         </button>
                         <div class="flex-1 min-w-0">
@@ -251,34 +208,19 @@
                             </div>
                         </div>
                     </div>
-                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition opacity-0 group-hover:opacity-100 delete-btn" data-id="${todo.id}" title="Xóa">
+                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition opacity-0 group-hover:opacity-100 delete-btn" onclick="deleteTodo(${todo.id})" title="Xóa">
                         <i class="fas fa-trash-alt"></i>
                     </button>
                 `;
             }
-
-            el.querySelector('.toggle-btn').addEventListener('click', (e) => {
-                const id = e.currentTarget.dataset.id;
-                const newStatus = e.currentTarget.dataset.status === "true";
-                toggleTodoStatus(id, newStatus);
-            });
-            el.querySelector('.delete-btn').addEventListener('click', (e) => {
-                const id = e.currentTarget.dataset.id;
-                deleteTodo(id);
-            });
 
             container.appendChild(el);
         }
 
         // --- Tag Management Functions ---
         function updateTagSelectors() {
-            // 1. Update Datalist (cho autocomplete)
             tagSuggestions.innerHTML = '';
-            
-            // 2. Update Dropdown (Select)
             tagSelect.innerHTML = '<option value="">Chọn tag...</option>';
-            
-            // 3. Update Chips
             quickTagsEl.innerHTML = '';
 
             if (availableTags.size > 0) {
@@ -313,14 +255,13 @@
             const val = selectEl.value;
             if (val) {
                 addTagToInput(val);
-                selectEl.value = ""; // Reset dropdown
+                selectEl.value = ""; 
             }
         }
 
         function addTagToInput(tag) {
             const current = tagsInput.value;
             if (current) {
-                // Kiểm tra xem tag đã tồn tại trong input chưa để tránh trùng lặp
                 const existingTags = current.split(',').map(t => t.trim());
                 if (!existingTags.includes(tag)) {
                     tagsInput.value = current + ", " + tag;
@@ -332,83 +273,61 @@
 
         // --- Actions ---
 
-        async function addTodo(e) {
+        function addTodo(e) {
             e.preventDefault();
-            if (!currentUser) return;
             
             const text = taskInput.value.trim();
             if (!text) return;
 
-            btnAdd.disabled = true;
-            btnAdd.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
             const tagsText = tagsInput.value.trim();
             const tags = tagsText ? tagsText.split(',').map(tag => tag.trim()).filter(tag => tag !== "") : [];
 
-            try {
-                await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'todos'), {
-                    text: text,
-                    completed: false,
-                    createdAt: new Date().toISOString(),
-                    alertTime: alertTimeInput.value || null,
-                    tags: tags
-                });
-                
-                taskInput.value = '';
-                tagsInput.value = '';
-                alertTimeInput.value = '';
-                showToast("Đã thêm công việc!", "success");
-            } catch (err) {
-                console.error(err);
-                showToast("Lỗi khi thêm công việc", "error");
-            } finally {
-                btnAdd.disabled = false;
-                btnAdd.innerHTML = '<i class="fas fa-plus mr-2"></i> Thêm Công Việc';
-            }
+            const newTodo = {
+                id: Date.now(),
+                text: text,
+                completed: false,
+                createdAt: new Date().toISOString(),
+                alertTime: alertTimeInput.value || null,
+                tags: tags
+            };
+
+            allTodos.unshift(newTodo);
+            saveTodos();
+            
+            taskInput.value = '';
+            tagsInput.value = '';
+            alertTimeInput.value = '';
+            showToast("Đã thêm công việc!", "success");
         }
 
-        async function toggleTodoStatus(id, isCompleted) {
-            if (!currentUser) return;
-            const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', id);
-            try {
-                await updateDoc(docRef, { completed: isCompleted });
-                showToast(isCompleted ? "Đã hoàn thành!" : "Đã mở lại công việc", "success");
-            } catch (err) {
-                showToast("Không thể cập nhật trạng thái", "error");
-            }
+        window.toggleTodoStatus = function(id) {
+            allTodos = allTodos.map(t => {
+                if (t.id === id) return { ...t, completed: !t.completed };
+                return t;
+            });
+            saveTodos();
+            const todo = allTodos.find(t => t.id === id);
+            showToast(todo.completed ? "Đã hoàn thành!" : "Đã mở lại công việc", "success");
         }
 
-        async function deleteTodo(id) {
-            if (!currentUser || !confirm("Bạn có chắc muốn xóa?")) return;
-            const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', id);
-            try {
-                await deleteDoc(docRef);
-            } catch (err) {
-                showToast("Lỗi khi xóa", "error");
-            }
+        window.deleteTodo = function(id) {
+            if (!confirm("Bạn có chắc muốn xóa?")) return;
+            allTodos = allTodos.filter(t => t.id !== id);
+            saveTodos();
+            showToast("Đã xóa công việc", "info");
         }
         
-        window.clearAllCompleted = async function(event) {
+        window.clearAllCompleted = function(event) {
             event.stopPropagation();
-            if (!currentUser) return;
             
-            const completedTodos = allTodos.filter(t => t.completed);
-            if (completedTodos.length === 0) return;
+            const completedCount = allTodos.filter(t => t.completed).length;
+            if (completedCount === 0) return;
 
-            if(!confirm(`Xóa vĩnh viễn ${completedTodos.length} công việc đã xong?`)) return;
+            if(!confirm(`Xóa vĩnh viễn ${completedCount} công việc đã xong?`)) return;
 
-            const batch = writeBatch(db);
-            completedTodos.forEach(t => {
-                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', t.id);
-                batch.delete(docRef);
-            });
-
-            try {
-                await batch.commit();
-                showToast("Đã dọn dẹp danh sách", "info");
-            } catch (err) {
-                showToast("Lỗi khi xóa hàng loạt", "error");
-            }
+            allTodos = allTodos.filter(t => !t.completed);
+            saveTodos();
+            showToast("Đã dọn dẹp danh sách", "info");
         }
 
         // --- UI Utilities ---
@@ -420,16 +339,7 @@
 
         window.toggleCompletedSection = function() {
             const list = document.getElementById('completed-list');
-            const icon = document.getElementById('toggle-icon');
             list.classList.toggle('hidden');
-            // Logic icon xoay hoặc đổi icon
-            if (list.classList.contains('hidden')) {
-                // icon.classList.remove('fa-chevron-up');
-                // icon.classList.add('fa-chevron-down');
-            } else {
-                // icon.classList.remove('fa-chevron-down');
-                // icon.classList.add('fa-chevron-up');
-            }
         }
         
         window.requestNotificationPermission = function() {
@@ -464,7 +374,10 @@
             const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
             
             allTodos.forEach(todo => {
+                // Check alert time logic
                 if (!todo.completed && todo.alertTime === currentTimeStr) {
+                     // Check if already alerted today (optional check, here we just check time match)
+                     // To make it robust, you could add 'lastAlerted' timestamp to todo item
                     if (Notification.permission === "granted") {
                         new Notification("Nhắc nhở công việc", { body: todo.text });
                     }

@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản Lý Công Việc (Đồng Bộ Cloud)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .task-enter { animation: slideIn 0.3s ease-out forwards; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .loader { border-top-color: #4f46e5; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
+        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen py-4 px-3 sm:px-6 lg:px-8">
+
+    <div class="max-w-3xl mx-auto">
+        <!-- Header -->
+        <div class="bg-white rounded-xl shadow-lg p-5 mb-5 relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-1 h-full bg-indigo-600"></div>
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800"><i class="fas fa-cloud text-indigo-500 mr-2"></i>Todo Cloud</h1>
+                    <p class="text-xs text-gray-500 mt-1" id="current-date">Đang kết nối máy chủ...</p>
+                    <p class="text-[10px] text-gray-400 mt-0.5">ID Người dùng: <span id="user-id-display">...</span></p>
+                </div>
+                <button onclick="requestNotificationPermission()" id="btn-notify" class="text-xs bg-gray-100 text-gray-600 px-3 py-2 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition">
+                    <i class="fas fa-bell"></i>
+                </button>
+            </div>
+
+            <!-- Form -->
+            <form id="todo-form" class="space-y-3">
+                <input type="text" id="task-input" class="w-full border border-gray-200 bg-gray-50 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition" placeholder="Nhập công việc cần làm..." required>
+                
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <div class="flex-1 relative">
+                        <input type="text" id="tags-input" class="w-full border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Thẻ (VD: Gấp, Dự án A)">
+                        <!-- Quick Tags Container -->
+                        <div id="quick-tags" class="flex flex-wrap gap-2 mt-2 min-h-[24px]">
+                            <!-- Tags gợi ý sẽ hiện ở đây -->
+                        </div>
+                    </div>
+                    <div class="w-full sm:w-40">
+                        <input type="time" id="alert-time" class="w-full border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-600">
+                    </div>
+                </div>
+
+                <button type="submit" id="btn-add" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md transition duration-200 flex justify-center items-center disabled:opacity-50">
+                    <i class="fas fa-plus mr-2"></i> Thêm Công Việc
+                </button>
+            </form>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading-indicator" class="flex justify-center py-4">
+            <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-8 w-8"></div>
+        </div>
+
+        <!-- SECTION: Đang thực hiện -->
+        <div class="mb-2 flex items-center justify-between">
+            <h2 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Cần làm (<span id="count-todo">0</span>)</h2>
+        </div>
+        <div id="todo-list" class="space-y-3 mb-8"></div>
+
+        <!-- SECTION: Đã hoàn thành -->
+        <div class="mb-2 flex items-center justify-between cursor-pointer hover:bg-gray-200 p-2 rounded transition" onclick="toggleCompletedSection()">
+            <h2 class="text-sm font-bold text-green-700 uppercase tracking-wide">
+                <i id="toggle-icon" class="fas fa-chevron-down mr-1 transition-transform"></i>
+                Đã xong (<span id="count-done">0</span>)
+            </h2>
+            <button onclick="clearAllCompleted(event)" class="text-xs text-red-500 hover:text-red-700 underline">Xóa tất cả</button>
+        </div>
+        <div id="completed-list" class="space-y-2 opacity-80"></div>
+
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, where } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+        // --- Config ---
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // --- DOM Elements ---
+        const todoForm = document.getElementById('todo-form');
+        const taskInput = document.getElementById('task-input');
+        const tagsInput = document.getElementById('tags-input');
+        const alertTimeInput = document.getElementById('alert-time');
+        const todoListEl = document.getElementById('todo-list');
+        const completedListEl = document.getElementById('completed-list');
+        const quickTagsEl = document.getElementById('quick-tags');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const btnAdd = document.getElementById('btn-add');
+        const userIdDisplay = document.getElementById('user-id-display');
+
+        let currentUser = null;
+        let allTodos = []; // Lưu trữ local để check logic báo thức
+        let availableTags = new Set(); // Lưu trữ các tag duy nhất
+
+        // --- Authentication ---
+        const initAuth = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+        initAuth();
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                userIdDisplay.textContent = user.uid.substring(0, 8) + "...";
+                updateDateTime();
+                setupRealtimeListener(user.uid);
+            }
+        });
+
+        // --- Firestore Realtime Listener ---
+        function setupRealtimeListener(userId) {
+            const q = query(
+                collection(db, 'artifacts', appId, 'users', userId, 'todos'),
+                orderBy('createdAt', 'desc')
+            );
+
+            onSnapshot(q, (snapshot) => {
+                loadingIndicator.classList.add('hidden');
+                allTodos = [];
+                availableTags.clear();
+                
+                // Clear lists
+                todoListEl.innerHTML = '';
+                completedListEl.innerHTML = '';
+                
+                let todoCount = 0;
+                let doneCount = 0;
+
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const todo = { id: doc.id, ...data };
+                    allTodos.push(todo);
+                    
+                    // Collect Tags
+                    if (data.tags && Array.isArray(data.tags)) {
+                        data.tags.forEach(tag => availableTags.add(tag));
+                    }
+
+                    if (data.completed) {
+                        doneCount++;
+                        renderTodoItem(todo, completedListEl, true);
+                    } else {
+                        todoCount++;
+                        renderTodoItem(todo, todoListEl, false);
+                    }
+                });
+
+                document.getElementById('count-todo').textContent = todoCount;
+                document.getElementById('count-done').textContent = doneCount;
+
+                // Cập nhật gợi ý tags
+                renderQuickTags();
+
+            }, (error) => {
+                console.error("Lỗi tải dữ liệu:", error);
+                showToast("Lỗi kết nối dữ liệu!", "error");
+            });
+        }
+
+        // --- Rendering ---
+        function renderTodoItem(todo, container, isCompleted) {
+            const tagsHtml = (todo.tags || []).map(tag => 
+                `<span class="inline-block bg-blue-50 text-blue-600 text-[10px] font-semibold px-2 py-0.5 rounded border border-blue-100 mr-1">#${tag}</span>`
+            ).join('');
+
+            const alertHtml = todo.alertTime 
+                ? `<span class="inline-flex items-center text-[10px] ${isCompleted ? 'text-gray-400' : 'text-orange-600 bg-orange-50'} px-2 py-0.5 rounded mr-1">
+                    <i class="fas fa-clock mr-1"></i> ${todo.alertTime}
+                   </span>` 
+                : '';
+
+            const el = document.createElement('div');
+            // Style khác nhau cho Completed và Active
+            if (isCompleted) {
+                el.className = "group flex items-center justify-between bg-white/50 p-3 rounded-lg border border-gray-100 transition hover:bg-white";
+                el.innerHTML = `
+                    <div class="flex items-center space-x-3 flex-1 overflow-hidden">
+                        <button class="text-green-500 hover:text-green-600 transition focus:outline-none toggle-btn" data-id="${todo.id}" data-status="false">
+                            <i class="fas fa-check-circle text-lg"></i>
+                        </button>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-gray-400 line-through text-sm truncate">${todo.text}</p>
+                            <div class="flex mt-1 opacity-50">${tagsHtml}</div>
+                        </div>
+                    </div>
+                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full transition delete-btn" data-id="${todo.id}">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+            } else {
+                el.className = "task-enter bg-white p-4 rounded-xl shadow-sm border-l-4 border-indigo-500 flex items-start justify-between group transition-all hover:shadow-md hover:translate-y-[-2px]";
+                el.innerHTML = `
+                    <div class="flex items-start space-x-3 flex-1 overflow-hidden">
+                        <button class="mt-0.5 text-gray-300 hover:text-indigo-500 transition focus:outline-none toggle-btn" data-id="${todo.id}" data-status="true">
+                            <i class="far fa-circle text-xl"></i>
+                        </button>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-gray-800 font-medium text-base leading-tight break-words">${todo.text}</p>
+                            <div class="flex flex-wrap items-center mt-2 gap-y-1">
+                                ${alertHtml}
+                                ${tagsHtml}
+                            </div>
+                        </div>
+                    </div>
+                    <button class="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition opacity-0 group-hover:opacity-100 delete-btn" data-id="${todo.id}">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                `;
+            }
+
+            // Event Delegation xử lý nút bấm
+            el.querySelector('.toggle-btn').addEventListener('click', (e) => {
+                const id = e.currentTarget.dataset.id;
+                const newStatus = e.currentTarget.dataset.status === "true";
+                toggleTodoStatus(id, newStatus);
+            });
+            el.querySelector('.delete-btn').addEventListener('click', (e) => {
+                const id = e.currentTarget.dataset.id;
+                deleteTodo(id);
+            });
+
+            container.appendChild(el);
+        }
+
+        function renderQuickTags() {
+            quickTagsEl.innerHTML = '';
+            if (availableTags.size === 0) {
+                quickTagsEl.innerHTML = '<span class="text-xs text-gray-400 italic">Chưa có thẻ nào được tạo.</span>';
+                return;
+            }
+            availableTags.forEach(tag => {
+                const tagBtn = document.createElement('button');
+                tagBtn.type = "button";
+                tagBtn.className = "text-xs bg-white border border-indigo-100 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-50 transition";
+                tagBtn.textContent = tag;
+                tagBtn.onclick = () => {
+                    const current = tagsInput.value;
+                    if (current) {
+                        if (!current.includes(tag)) tagsInput.value = current + ", " + tag;
+                    } else {
+                        tagsInput.value = tag;
+                    }
+                };
+                quickTagsEl.appendChild(tagBtn);
+            });
+        }
+
+        // --- Actions ---
+
+        async function addTodo(e) {
+            e.preventDefault();
+            if (!currentUser) return;
+            
+            const text = taskInput.value.trim();
+            if (!text) return;
+
+            btnAdd.disabled = true;
+            btnAdd.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            const tagsText = tagsInput.value.trim();
+            const tags = tagsText ? tagsText.split(',').map(tag => tag.trim()).filter(tag => tag !== "") : [];
+
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'todos'), {
+                    text: text,
+                    completed: false,
+                    createdAt: new Date().toISOString(),
+                    alertTime: alertTimeInput.value || null,
+                    tags: tags
+                });
+                
+                // Reset form
+                taskInput.value = '';
+                tagsInput.value = '';
+                alertTimeInput.value = '';
+                showToast("Đã thêm công việc!", "success");
+            } catch (err) {
+                console.error(err);
+                showToast("Lỗi khi thêm công việc", "error");
+            } finally {
+                btnAdd.disabled = false;
+                btnAdd.innerHTML = '<i class="fas fa-plus mr-2"></i> Thêm Công Việc';
+            }
+        }
+
+        async function toggleTodoStatus(id, isCompleted) {
+            if (!currentUser) return;
+            const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', id);
+            try {
+                await updateDoc(docRef, { completed: isCompleted });
+                showToast(isCompleted ? "Đã hoàn thành!" : "Đã mở lại công việc", "success");
+            } catch (err) {
+                showToast("Không thể cập nhật trạng thái", "error");
+            }
+        }
+
+        async function deleteTodo(id) {
+            if (!currentUser || !confirm("Bạn có chắc muốn xóa?")) return;
+            const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', id);
+            try {
+                await deleteDoc(docRef);
+            } catch (err) {
+                showToast("Lỗi khi xóa", "error");
+            }
+        }
+        
+        // Expose function globally for the Clear All button
+        window.clearAllCompleted = async function(event) {
+            event.stopPropagation(); // Prevent toggling the accordion
+            if (!currentUser) return;
+            
+            const completedTodos = allTodos.filter(t => t.completed);
+            if (completedTodos.length === 0) return;
+
+            if(!confirm(`Xóa vĩnh viễn ${completedTodos.length} công việc đã xong?`)) return;
+
+            const batch = writeBatch(db);
+            completedTodos.forEach(t => {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'todos', t.id);
+                batch.delete(docRef);
+            });
+
+            try {
+                await batch.commit();
+                showToast("Đã dọn dẹp danh sách", "info");
+            } catch (err) {
+                showToast("Lỗi khi xóa hàng loạt", "error");
+            }
+        }
+
+        // --- UI Utilities ---
+        function updateDateTime() {
+            const now = new Date();
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            document.getElementById('current-date').textContent = now.toLocaleDateString('vi-VN', options);
+        }
+
+        // Logic UI Toggle Section
+        window.toggleCompletedSection = function() {
+            const list = document.getElementById('completed-list');
+            const icon = document.getElementById('toggle-icon');
+            list.classList.toggle('hidden');
+            if (list.classList.contains('hidden')) {
+                icon.style.transform = 'rotate(-90deg)';
+            } else {
+                icon.style.transform = 'rotate(0deg)';
+            }
+        }
+        
+        // Initial Notification Request wrapper
+        window.requestNotificationPermission = function() {
+             if (!("Notification" in window)) {
+                alert("Trình duyệt không hỗ trợ thông báo");
+                return;
+            }
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") showToast("Đã bật thông báo", "success");
+            });
+        }
+
+        window.showToast = function(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            let bgClass = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-gray-800';
+            toast.className = `${bgClass} text-white px-4 py-3 rounded shadow-lg flex items-center space-x-2 text-sm transform transition-all duration-300 translate-x-full opacity-0`;
+            toast.innerHTML = `<span>${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => toast.classList.remove('translate-x-full', 'opacity-0'), 10);
+            setTimeout(() => {
+                toast.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- Alert System ---
+        setInterval(() => {
+            const now = new Date();
+            if (now.getSeconds() > 5) return; // Only check at start of minute
+            
+            const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            
+            allTodos.forEach(todo => {
+                if (!todo.completed && todo.alertTime === currentTimeStr) {
+                    if (Notification.permission === "granted") {
+                        new Notification("Nhắc nhở công việc", { body: todo.text });
+                    }
+                    showToast(`Đến giờ: ${todo.text}`, "warning");
+                }
+            });
+        }, 5000);
+
+        todoForm.addEventListener('submit', addTodo);
+    </script>
+</body>
+</html>

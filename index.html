@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quản Lý Công Việc (Public) - Quick Tags</title>
+    <title>Quản Lý Công Việc (Public) - Persistent</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -49,8 +49,8 @@
                     </h1>
                     <p class="text-xs text-gray-500 mt-1" id="current-date">Đang khởi động...</p>
                     <p class="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
-                        <i class="fas fa-users text-indigo-500"></i>
-                        <span id="user-id-display">Đang kết nối Server...</span>
+                        <i class="fas fa-database text-indigo-500"></i>
+                        ID Dữ liệu: <span id="data-id-display" class="font-mono font-bold ml-1">...</span>
                     </p>
                 </div>
                 <div class="flex gap-2">
@@ -268,7 +268,13 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
-        // --- Config ---
+        // --- CẤU HÌNH LƯU TRỮ (QUAN TRỌNG - SETTING BẠN CẦN) ---
+        // Biến DATA_APP_ID này là chìa khóa để lưu và tải dữ liệu.
+        // - Giữ nguyên: Dữ liệu sẽ được bảo lưu khi bạn cập nhật file HTML mới.
+        // - Đổi tên: Sẽ tạo ra một kho dữ liệu mới hoàn toàn (ví dụ: 'my-todo-app-v2').
+        const DATA_APP_ID = 'my-todo-app'; 
+
+        // --- Firebase Config ---
         const firebaseConfig = {
             apiKey: "AIzaSyABja0AYV5E_n0UgtMyICjVHyBMsevlyqU",
             authDomain: "clipboard-aca15.firebaseapp.com",
@@ -283,8 +289,6 @@
         let currentUser = null;
         let allTodos = []; 
         let availableTags = new Set();
-        // ID ứng dụng chung để phân định dữ liệu trong artifacts
-        const appId = 'my-todo-app'; 
 
         // Variables for Editing
         let currentEditingId = null;
@@ -302,7 +306,7 @@
         const quickTagsEl = document.getElementById('quick-tags');
         const loadingIndicator = document.getElementById('loading-indicator');
         const btnAdd = document.getElementById('btn-add');
-        const userIdDisplay = document.getElementById('user-id-display');
+        const userIdDisplay = document.getElementById('data-id-display');
         const statusBanner = document.getElementById('status-banner');
         const statusText = document.getElementById('status-text');
         const retryBtn = document.getElementById('retry-btn');
@@ -356,15 +360,15 @@
             headerIcon.classList.remove('fa-spin');
             modeLabel.textContent = "Public";
             
-            // Hiển thị trạng thái Public thay vì User ID
-            userIdDisplay.textContent = "Chế độ Công khai (Dùng chung)";
-            userIdDisplay.classList.add("text-purple-600", "font-bold");
+            // Hiển thị App ID đang dùng để user biết dữ liệu nào đang được tải
+            userIdDisplay.textContent = DATA_APP_ID;
+            userIdDisplay.classList.add("text-purple-600");
             userIdDisplay.classList.remove("text-orange-500");
             
             statusBanner.classList.add('hidden');
             // Gọi hàm setupListener không cần tham số userId nữa
             setupRealtimeListener();
-            showToast("Đã kết nối dữ liệu công khai!", "success");
+            showToast("Đã kết nối dữ liệu: " + DATA_APP_ID, "success");
         }
 
         function switchToOfflineMode(reason) {
@@ -375,9 +379,12 @@
             headerIcon.className = "fas fa-database text-orange-500 mr-2";
             headerIcon.classList.remove('fa-spin');
             modeLabel.textContent = "Offline";
-            userIdDisplay.textContent = "Lưu trên máy này (Riêng tư)";
+            
+            // Hiển thị trạng thái offline
+            userIdDisplay.textContent = DATA_APP_ID + " (Offline)";
             userIdDisplay.classList.add("text-orange-500");
             userIdDisplay.classList.remove("text-purple-600");
+            
             statusBanner.classList.remove('hidden');
             statusBanner.className = "mb-4 p-3 rounded-lg flex items-center justify-between text-sm shadow-sm transition-all bg-orange-50 border border-orange-200 text-orange-700";
             statusText.innerHTML = `<i class="fas fa-exclamation-circle mr-2"></i> ${reason}`;
@@ -389,9 +396,9 @@
 
         function setupRealtimeListener() {
             if (isOfflineMode) return;
-            // THAY ĐỔI QUAN TRỌNG: Sử dụng đường dẫn public thay vì users/{userId}
-            // Quy tắc: artifacts/{appId}/public/data/{collectionName}
-            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'todos'), orderBy('createdAt', 'desc'));
+            // THAY ĐỔI: Sử dụng DATA_APP_ID động
+            // Quy tắc: artifacts/{DATA_APP_ID}/public/data/{collectionName}
+            const q = query(collection(db, 'artifacts', DATA_APP_ID, 'public', 'data', 'todos'), orderBy('createdAt', 'desc'));
             
             onSnapshot(q, (snapshot) => {
                 processSnapshotData(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -406,7 +413,8 @@
         }
 
         function loadOfflineData() {
-            const localData = JSON.parse(localStorage.getItem('todos_offline_public')) || [];
+            // Sử dụng key localStorage có chứa DATA_APP_ID để tách biệt dữ liệu offline giữa các app khác nhau
+            const localData = JSON.parse(localStorage.getItem('todos_offline_' + DATA_APP_ID)) || [];
             localData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             processSnapshotData(localData);
         }
@@ -465,7 +473,7 @@
                 return;
             }
 
-            document.getElementById('exp-user').textContent = isOfflineMode ? "Offline (Local)" : "Dữ liệu Công khai (Public)";
+            document.getElementById('exp-user').textContent = isOfflineMode ? "Offline" : "Public (" + DATA_APP_ID + ")";
             document.getElementById('exp-time').textContent = new Date().toLocaleString('vi-VN');
             document.getElementById('exp-range').textContent = `${startDate.toLocaleDateString('vi-VN')} - ${endDate.toLocaleDateString('vi-VN')}`;
             
@@ -492,7 +500,7 @@
 
             const element = document.getElementById('export-template');
             element.classList.remove('hidden'); 
-            const fileName = `Bao_Cao_Cong_Viec_Public_${new Date().getTime()}`;
+            const fileName = `Bao_Cao_${DATA_APP_ID}_${new Date().getTime()}`;
 
             if (format === 'pdf') {
                 const opt = {
@@ -557,8 +565,8 @@
                     processSnapshotData(allTodos);
                     showToast("Đã lưu (Offline)!", "success");
                 } else {
-                    // THAY ĐỔI: Lưu vào public collection
-                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'todos'), newTodoData);
+                    // THAY ĐỔI: Lưu vào public collection với DATA_APP_ID
+                    await addDoc(collection(db, 'artifacts', DATA_APP_ID, 'public', 'data', 'todos'), newTodoData);
                     showToast("Đã lưu lên Cloud (Public)!", "success");
                 }
                 taskInput.value = ''; tagsInput.value = ''; alertTimeInput.value = '';
@@ -586,8 +594,8 @@
                         processSnapshotData(allTodos);
                     }
                 } else {
-                    // THAY ĐỔI: Path public
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'todos', id);
+                    // THAY ĐỔI: Path public với DATA_APP_ID
+                    const docRef = doc(db, 'artifacts', DATA_APP_ID, 'public', 'data', 'todos', id);
                     await updateDoc(docRef, { tags: newTags });
                 }
             } catch (err) { showToast("Lỗi xóa tag", "error"); }
@@ -641,8 +649,8 @@
                         showToast("Đã thêm tag (Offline)", "success");
                     }
                 } else {
-                    // THAY ĐỔI: Path public
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'todos', id);
+                    // THAY ĐỔI: Path public với DATA_APP_ID
+                    const docRef = doc(db, 'artifacts', DATA_APP_ID, 'public', 'data', 'todos', id);
                     await updateDoc(docRef, { tags: newTags });
                     showToast("Đã thêm tag", "success");
                 }
@@ -745,8 +753,8 @@
                         showToast("Đã cập nhật (Offline)", "success");
                     }
                 } else {
-                    // THAY ĐỔI: Path public
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'todos', currentEditingId);
+                    // THAY ĐỔI: Path public với DATA_APP_ID
+                    const docRef = doc(db, 'artifacts', DATA_APP_ID, 'public', 'data', 'todos', currentEditingId);
                     await updateDoc(docRef, updateData);
                     showToast("Đã cập nhật trên Cloud (Public)", "success");
                 }
@@ -772,8 +780,8 @@
                         showToast(isCompleted ? "Đã xong!" : "Đã mở lại", "success");
                     }
                 } else {
-                    // THAY ĐỔI: Path public
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'todos', id);
+                    // THAY ĐỔI: Path public với DATA_APP_ID
+                    const docRef = doc(db, 'artifacts', DATA_APP_ID, 'public', 'data', 'todos', id);
                     await updateDoc(docRef, { completed: isCompleted });
                     showToast(isCompleted ? "Đã xong!" : "Đã mở lại", "success");
                 }
@@ -789,8 +797,8 @@
                     processSnapshotData(allTodos);
                     showToast("Đã xóa (Offline)", "info");
                 } else {
-                    // THAY ĐỔI: Path public
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'todos', id);
+                    // THAY ĐỔI: Path public với DATA_APP_ID
+                    const docRef = doc(db, 'artifacts', DATA_APP_ID, 'public', 'data', 'todos', id);
                     await deleteDoc(docRef);
                     showToast("Đã xóa trên Cloud (Public)", "info");
                 }
@@ -811,8 +819,8 @@
                 } else {
                     const batch = writeBatch(db);
                     completedTodos.forEach(t => {
-                        // THAY ĐỔI: Path public
-                        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'todos', t.id);
+                        // THAY ĐỔI: Path public với DATA_APP_ID
+                        const docRef = doc(db, 'artifacts', DATA_APP_ID, 'public', 'data', 'todos', t.id);
                         batch.delete(docRef);
                     });
                     await batch.commit();
@@ -821,7 +829,7 @@
             } catch (err) { showToast("Lỗi xóa hàng loạt", "error"); }
         }
 
-        function saveToLocalStorage() { localStorage.setItem('todos_offline_public', JSON.stringify(allTodos)); }
+        function saveToLocalStorage() { localStorage.setItem('todos_offline_' + DATA_APP_ID, JSON.stringify(allTodos)); }
 
         function renderTodoItem(todo, container, isCompleted) {
             const tagsHtml = (todo.tags || []).map(tag => `
